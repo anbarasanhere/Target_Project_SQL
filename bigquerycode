@@ -1,0 +1,239 @@
+select * from
+`scaler-dsml-sql-gcp.target_case_study.customers`
+
+
+#Get the time range between which the orders were placed.
+SELECT 
+MIN(order_purchase_timestamp) AS earliest_order_timestamp,
+MAX(order_purchase_timestamp) AS latest_order_timestamp
+FROM `scaler-dsml-sql-gcp.target_case_study.orders`;
+#
+SELECT 
+  customer_city,
+  COUNT(DISTINCT customer_id) AS customer_count
+FROM `scaler-dsml-sql-gcp.target_case_study.customers` as C
+Join `scaler-dsml-sql-gcp.target_case_study.orders` as O
+on C.customer_id = O.customer_id
+WHERE order_purchase_timestamp BETWEEN '2016-09-04 21:15:19 UTC'  AND '2018-10-17 17:30:18 UTC'
+GROUP BY customer_city;
+
+#
+select 
+   customer_id,
+   customer_unique_id,
+   customer_zip_code_prefix,
+   customer_city,
+   customer_state
+   data_type 
+from `scaler-dsml-sql-gcp.target_case_study.customers`
+where table_name = 'customers'
+
+select
+   customer_id,
+   customer_unique_id,
+   customer_zip_code_prefix,
+   customer_city,
+   customer_state
+   data_type 
+from `scaler-dsml-sql-gcp.target_case_study.INFORMATION_SCHEMA.COLUMNS`
+where TABLE_NAME = 'customers';
+
+select
+column_name,
+data_type
+from `scaler-dsml-sql-gcp.target_case_study.INFORMATION_SCHEMA.COLUMNS`
+where table_name = 'customers';
+
+-- During what time of the day, do the Brazilian customers mostly place their orders? (Dawn, Morning, Afternoon or Night)
+-- 0-6 hrs : Dawn
+-- 7-12 hrs : Mornings
+-- 13-18 hrs : Afternoon
+-- 19-23 hrs : Night
+
+SELECT
+  CASE
+    WHEN EXTRACT(HOUR FROM order_purchase_timestamp) BETWEEN 0 AND 6 THEN 'Dawn'
+    WHEN EXTRACT(HOUR FROM order_purchase_timestamp) BETWEEN 7 AND 12 THEN 'Morning'
+    WHEN EXTRACT(HOUR FROM order_purchase_timestamp) BETWEEN 13 AND 18 THEN 'Afternoon'
+    WHEN EXTRACT(HOUR FROM order_purchase_timestamp) BETWEEN 19 AND 23 THEN 'Night'
+  END AS time_of_the_day,
+  COUNT(*) AS num_of_orders
+FROM `scaler-dsml-sql-gcp.target_case_study.orders`
+GROUP BY time_of_the_day
+ORDER BY time_of_the_day
+
+
+#Get the month on month no. of orders placed in each state.
+select
+c.customer_state,
+extract(month from order_purchase_timestamp) as month,
+count(1) as num_orders
+from `scaler-dsml-sql-gcp.target_case_study.orders` o 
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.customers` c 
+ON o.customer_id = c.customer_id
+group by 1,2
+order by 3 desc;
+
+
+#How are the customers distributed across all the states?
+select
+customer_state as state,
+count(customer_id) as num_customers,
+from `scaler-dsml-sql-gcp.target_case_study.customers`
+group by 1
+order by 2 desc;
+
+#a)Get the % increase in the cost of orders from year 2017 to 2018 
+#(include months between Jan to Aug only).
+with cte1 AS (
+select *
+from `scaler-dsml-sql-gcp.target_case_study.orders` o 
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.payments` p 
+ON o.order_id = p.order_id
+where extract(year from order_purchase_timestamp) BETWEEN 2017 and 2018
+AND extract(month from order_purchase_timestamp) BETWEEN 1 and 8 ),
+cte2 AS
+(select
+extract(YEAR from order_purchase_timestamp) as year,
+SUM(payment_value) as cost
+from cte1
+group by 1
+order by 1),
+cte3 AS
+(select *,
+LEAD(cost) OVER(order by year) as next_year
+from cte2)
+select *,
+ROUND((next_year - cost)/cost * 100,2) as percent_increase
+from cte3;
+
+#4.b. Calculate the Total & Average value of order price for each state.
+select
+c.customer_state,
+count(distinct o.order_id) as num_orders,
+ROUND(sum(oi.price),2) as total_value,
+ROUND(avg(oi.price),2) as avg_price
+from `scaler-dsml-sql-gcp.target_case_study.order_items` oi INNER JOIN `scaler-dsml-sql-gcp.target_case_study.orders` o ON oi.order_id =
+o.order_id
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.customers` c 
+ON c.customer_id = o.customer_id
+group by customer_state
+order by 2 desc;
+
+#4.b. Calculate the Total & Average value of order freight for each state.
+SELECT 
+c.customer_state,
+count(distinct o.order_id) as num_orders,
+ROUND(SUM(oi.freight_value),2) as total_value,
+ROUND(avg(oi.freight_value),2) as avg_price 
+from `scaler-dsml-sql-gcp.target_case_study.order_items` oi 
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.orders` o
+ON oi.order_id = o.order_id
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.customers` c
+ON c.customer_id = o.customer_id
+group by c.customer_state
+order by 2 desc;
+
+#FWGHSOLO
+
+#5.a Find the no. of days taken to deliver each order from the order’s purchase date as delivery time.
+#calculate the difference (in days) between the estimated & actual delivery date of an order.
+
+SELECT
+timestamp_diff(order_delivered_customer_date, order_purchase_timestamp, DAY)
+AS time_to_deliver,
+timestamp_diff(order_delivered_customer_date, order_estimated_delivery_date, DAY) 
+AS diff_estimated_deliver
+FROM `scaler-dsml-sql-gcp.target_case_study.orders`
+WHERE order_status = 'delivered';
+
+#5.b Find out top 5 states with the highest freight value
+
+SELECT s.seller_state, 
+AVG(oi.freight_value) AS avg_freight_value
+FROM `scaler-dsml-sql-gcp.target_case_study.sellers` s
+JOIN `scaler-dsml-sql-gcp.target_case_study.order_items` oi
+ON s.seller_id = oi.seller_id
+GROUP BY s.seller_state
+ORDER BY avg_freight_value DESC
+LIMIT 5;
+
+# Find out top 5 states with the lowest freight value
+
+SELECT s.seller_state, 
+AVG(oi.freight_value) AS avg_freight_value
+FROM `scaler-dsml-sql-gcp.target_case_study.sellers` s
+JOIN `scaler-dsml-sql-gcp.target_case_study.order_items` oi
+ON s.seller_id = oi.seller_id
+GROUP BY s.seller_state
+ORDER BY avg_freight_value ASC
+LIMIT 5;
+
+# 5.C Find out the top 5 states with the highest average delivery time.
+SELECT
+c.customer_state,
+AVG(TIMESTAMP_DIFF(o.order_delivered_customer_date, o.order_purchase_timestamp, DAY)) AS avg_delivery_time_days
+FROM `scaler-dsml-sql-gcp.target_case_study.customers` c
+JOIN `scaler-dsml-sql-gcp.target_case_study.orders` o
+ON c.customer_id = o.customer_id
+GROUP BY c.customer_state
+ORDER BY avg_delivery_time_days DESC
+LIMIT 5;
+
+# 5.C Find out the top 5 states with the lowest average delivery time.
+SELECT
+c.customer_state,
+AVG(TIMESTAMP_DIFF(o.order_delivered_customer_date, o.order_purchase_timestamp, DAY)) AS avg_delivery_time_days
+FROM `scaler-dsml-sql-gcp.target_case_study.customers` c
+JOIN `scaler-dsml-sql-gcp.target_case_study.orders` o
+ON c.customer_id = o.customer_id
+GROUP BY c.customer_state
+ORDER BY avg_delivery_time_days
+LIMIT 5;
+
+
+
+
+
+
+
+#5.d. Find out the top 5 states where the order delivery is really fast as compared
+# to the estimated date of delivery.
+
+SELECT
+customer_state AS state,
+ROUND(SUM(TIMESTAMP_DIFF(order_delivered_customer_date, order_purchase_timestamp,
+DAY))/COUNT(ORDER_ID), 2) AS average_time_for_delivery,
+ROUND(SUM(TIMESTAMP_DIFF(order_estimated_delivery_date, order_purchase_timestamp,
+DAY))/COUNT(ORDER_ID), 2) AS average_est_del_time,
+FROM `scaler-dsml-sql-gcp.target_case_study.orders` o
+INNER JOIN `scaler-dsml-sql-gcp.target_case_study.customers` c
+ON o.customer_id=c.customer_id
+WHERE order_status='delivered'
+GROUP BY customer_state
+ORDER BY (average_time_for_delivery-average_est_del_time)
+limit 5;
+
+#6.a. Find the month on month no. of orders placed using different payment types.
+
+SELECT
+EXTRACT(YEAR FROM o.order_purchase_timestamp) AS year,
+EXTRACT(MONTH FROM o.order_purchase_timestamp) AS month,
+p.payment_type,
+COUNT(*) AS num_orders
+FROM `scaler-dsml-sql-gcp.target_case_study.orders` o
+JOIN `scaler-dsml-sql-gcp.target_case_study.payments` p
+ON o.order_id = p.order_id
+GROUP BY year, month, p.payment_type
+ORDER BY year, month, p.payment_type;
+
+
+#6.b. Find the no. of orders placed on the basis of the payment installments that
+#have been paid.
+select
+payment_installments as installmnets,
+count(order_id) as num_orders
+from `scaler-dsml-sql-gcp.target_case_study.payments`
+where payment_installments >= 1
+group by payment_installments
+order by 2 desc;
